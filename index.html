@@ -1,0 +1,1087 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <title>ICMR STS — Family Survey</title>
+    <link rel="icon" type="image/png" href="logo.png">
+    <link rel="apple-touch-icon" href="logo.png">
+    <link rel="manifest" href="manifest.json">
+    
+    <!-- SheetJS for offline Excel export -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+    <!-- Firebase Compat -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+
+    <style>
+        /* ===== PALETTE (inspired by the logo's purple-blue gradient) ===== */
+        :root {
+            --grad-start: #6C63FF;
+            --grad-end:   #A855F7;
+            --primary:    #6C63FF;
+            --primary-dark: #5549e0;
+            --accent-green: #22C55E;
+            --accent-orange:#F59E0B;
+            --accent-purple:#A855F7;
+            --bg:         #F0F2F9;
+            --surface:    #FFFFFF;
+            --text:       #2D3250;
+            --text-sec:   #7C7FA0;
+            --border:     #E4E6F1;
+            --error:      #EF4444;
+            --radius:     14px;
+            --radius-sm:  10px;
+            --font: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        /* ===== RESET ===== */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html { font-size: 16px; }
+        body { background: var(--bg); color: var(--text); font-family: var(--font); -webkit-font-smoothing: antialiased; }
+
+        /* ===== LAYOUT ===== */
+        #app { max-width: 480px; margin: 0 auto; min-height: 100vh; display: flex; flex-direction: column; }
+        @media (min-width: 768px) { #app { max-width: 540px; } }
+        @media (min-width: 1024px) { #app { max-width: 600px; } }
+
+        /* ===== HEADER BAR ===== */
+        .topbar {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 14px 18px; background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            position: sticky; top: 0; z-index: 50;
+        }
+        .topbar-left { display: flex; align-items: center; gap: 10px; }
+        .topbar-left img { height: 32px; width: 32px; border-radius: 8px; object-fit: contain; }
+        .topbar-left h1 { font-size: 1.05rem; font-weight: 700; color: var(--text); }
+        .topbar-right { display: flex; align-items: center; gap: 8px; }
+        .net-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .net-dot.online { background: var(--accent-green); }
+        .net-dot.offline { background: var(--error); }
+        .net-label { font-size: 0.72rem; color: var(--text-sec); }
+        .id-badge {
+            background: linear-gradient(135deg, var(--grad-start), var(--grad-end));
+            color: white; font-size: 0.7rem; font-weight: 700; padding: 4px 10px;
+            border-radius: 20px; letter-spacing: 0.5px;
+        }
+        .topbar-icon { width: 22px; height: 22px; border-radius: 6px; cursor: pointer; }
+
+        main { flex: 1; padding: 16px; }
+
+        /* ===== CARDS ===== */
+        .card {
+            background: var(--surface); border-radius: var(--radius);
+            padding: 18px; box-shadow: 0 2px 8px rgba(108,99,255,0.06);
+            border: 1px solid var(--border); margin-bottom: 16px;
+        }
+        .card-flush { padding: 14px; }
+
+        /* ===== STAT ROW (4 items) ===== */
+        .stats-row {
+            display: grid; grid-template-columns: repeat(4, 1fr);
+            gap: 10px; margin-bottom: 16px;
+        }
+        .stat-box {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: var(--radius-sm); padding: 12px 6px;
+            text-align: center;
+            box-shadow: 0 1px 4px rgba(108,99,255,0.05);
+        }
+        .stat-box .num { font-size: 1.6rem; font-weight: 800; color: var(--text); }
+        .stat-box .lbl { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-sec); margin-top: 2px; line-height: 1.2; }
+        @media (max-width: 360px) { .stat-box .num { font-size: 1.3rem; } .stat-box .lbl { font-size: 0.55rem; } }
+
+        /* ===== OCCUPATION DONUT RINGS ===== */
+        .occ-section-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-sec); font-weight: 600; margin-bottom: 12px; }
+        .occ-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+        .occ-card {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 18px 10px;
+            text-align: center;
+            box-shadow: 0 1px 4px rgba(108,99,255,0.05);
+        }
+        .occ-card .ring-wrap { position: relative; width: 80px; height: 80px; margin: 0 auto 8px auto; }
+        .occ-card svg.ring { width: 80px; height: 80px; transform: rotate(-90deg); }
+        .occ-card .ring-num { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 1.4rem; font-weight: 800; color: var(--text); }
+        .occ-card .occ-label { font-size: 0.78rem; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+        .occ-card .occ-pct { font-size: 0.72rem; color: var(--text-sec); }
+
+        /* ===== BIG CTA ===== */
+        .btn-cta {
+            display: flex; align-items: center; justify-content: center; gap: 10px;
+            width: 100%; padding: 16px; border: none; border-radius: var(--radius);
+            background: linear-gradient(135deg, var(--grad-start), var(--grad-end));
+            color: white; font-size: 1.1rem; font-weight: 700; cursor: pointer;
+            box-shadow: 0 4px 14px rgba(108,99,255,0.35);
+            transition: transform 0.15s, box-shadow 0.15s;
+            margin-bottom: 14px;
+        }
+        .btn-cta:active { transform: scale(0.98); box-shadow: 0 2px 8px rgba(108,99,255,0.25); }
+
+        /* ===== ACTION GRID ===== */
+        .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+        .action-btn {
+            display: flex; align-items: center; gap: 10px;
+            background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+            padding: 14px; cursor: pointer; transition: box-shadow 0.15s;
+            font-size: 0.85rem; font-weight: 600; color: var(--text);
+        }
+        .action-btn:active { box-shadow: 0 2px 12px rgba(108,99,255,0.15); }
+        .action-btn .aicon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; }
+        .action-btn.full-width { grid-column: 1 / -1; }
+
+        /* ===== SECTION TITLE ===== */
+        .sec-title { font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--primary); margin-bottom: 10px; }
+
+        /* ===== RECORD LIST ITEMS ===== */
+        .rec-item {
+            display: flex; align-items: center; gap: 12px;
+            background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+            padding: 12px 14px; margin-bottom: 8px; cursor: pointer;
+            transition: box-shadow 0.15s;
+        }
+        .rec-item:active { box-shadow: 0 2px 12px rgba(108,99,255,0.12); }
+        .rec-avatar {
+            width: 38px; height: 38px; border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 0.85rem; color: white; flex-shrink: 0;
+        }
+        .rec-body { flex: 1; min-width: 0; }
+        .rec-body .rname { font-weight: 600; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .rec-body .rsub { font-size: 0.72rem; color: var(--text-sec); }
+        .rec-badge { font-size: 0.65rem; padding: 3px 8px; border-radius: 10px; font-weight: 700; white-space: nowrap; }
+        .badge-draft { background: #FFF3E0; color: #E65100; }
+        .badge-done { background: #E8F5E9; color: #16A34A; }
+        .badge-synced { background: #EDE9FE; color: var(--primary); }
+        .rec-actions { display: flex; gap: 6px; }
+        .rec-actions button { background: none; border: none; font-size: 1rem; cursor: pointer; padding: 4px; }
+
+        /* ===== FORM ELEMENTS ===== */
+        .input {
+            width: 100%; padding: 13px 14px; border: 1.5px solid var(--border);
+            border-radius: var(--radius-sm); font-size: 1rem; background: #FAFAFF;
+            color: var(--text); transition: border 0.2s, box-shadow 0.2s;
+        }
+        .input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(108,99,255,0.15); background: #fff; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; margin-bottom: 6px; font-weight: 600; font-size: 0.9rem; color: var(--text); }
+
+        /* ===== GENERAL BUTTONS ===== */
+        .btn { display: inline-flex; align-items: center; justify-content: center; width: 100%; padding: 13px 16px; font-size: 0.95rem; font-weight: 600; text-align: center; border: none; border-radius: var(--radius-sm); cursor: pointer; transition: all 0.15s; margin-bottom: 8px; gap: 8px; }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:active { background: var(--primary-dark); }
+        .btn-secondary { background: var(--surface); color: var(--primary); border: 2px solid var(--primary); }
+        .btn-success { background: var(--accent-green); color: white; }
+        .btn-danger { background: var(--error); color: white; }
+        .btn-outline { background: transparent; border: 1.5px solid var(--border); color: var(--text-sec); }
+        .btn-ghost { background: none; border: none; color: var(--primary); font-weight: 600; }
+        .nav-buttons { display: flex; gap: 10px; margin-top: 20px; }
+        .nav-buttons .btn { flex: 1; }
+
+        /* ===== PROGRESS BAR ===== */
+        .progress-bar { background: var(--border); height: 6px; border-radius: 3px; margin-bottom: 14px; overflow: hidden; }
+        .progress-fill { background: linear-gradient(90deg, var(--grad-start), var(--grad-end)); height: 100%; transition: width 0.3s ease; border-radius: 3px; }
+
+        /* ===== MEMBER LIST ===== */
+        .member-list { list-style: none; margin-bottom: 14px; }
+        .member-list li { padding: 10px 12px; background: #FAFAFF; border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+
+        /* ===== TOAST ===== */
+        .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, var(--grad-start), var(--grad-end)); color: white; padding: 12px 24px; border-radius: 24px; font-size: 0.88rem; font-weight: 600; display: none; z-index: 1000; box-shadow: 0 4px 16px rgba(108,99,255,0.35); }
+
+        /* ===== LOGIN ===== */
+        .login-wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 80vh; padding: 20px; }
+        .login-card { width: 100%; max-width: 360px; text-align: center; }
+        .login-card img { height: 90px; margin-bottom: 16px; border-radius: 16px; }
+        .login-card h2 { font-size: 1.5rem; margin-bottom: 6px; color: var(--text); }
+        .login-card p { font-size: 0.88rem; color: var(--text-sec); margin-bottom: 24px; }
+
+        /* ===== iOS TIP ===== */
+        .ios-tip { font-size: 0.7rem; color: var(--text-sec); text-align: center; margin-top: 30px; padding: 10px; background: #FAFAFF; border-radius: 8px; }
+
+        /* ===== LOGOUT BAR ===== */
+        .logout-row { text-align: center; margin-top: 10px; margin-bottom: 30px; }
+        .logout-btn { background: none; border: 1.5px solid var(--border); color: var(--text-sec); padding: 10px 28px; border-radius: 24px; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
+        .logout-btn:active { background: #f5f5f5; }
+
+        /* ===== INSTALL BANNER ===== */
+        .install-banner {
+            display: flex; align-items: center; justify-content: center; gap: 10px;
+            width: 100%; padding: 12px 16px; border: 2px dashed var(--primary);
+            border-radius: var(--radius-sm); background: #EDEBFF;
+            color: var(--primary); font-size: 0.88rem; font-weight: 600;
+            cursor: pointer; margin-bottom: 14px; transition: background 0.15s;
+        }
+        .install-banner:active { background: #DDD8FF; }
+
+        /* ===== ANIMATIONS ===== */
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes scaleIn { from { opacity: 0; transform: scale(0.5); } to { opacity: 1; transform: scale(1); } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(40px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+        @keyframes float1 { 0%,100% { transform: translateY(0) rotate(0deg); opacity:0.7; } 50% { transform: translateY(-30px) rotate(15deg); opacity:1; } }
+        @keyframes float2 { 0%,100% { transform: translateY(0) rotate(0deg); opacity:0.5; } 50% { transform: translateY(-25px) rotate(-10deg); opacity:0.9; } }
+        @keyframes float3 { 0%,100% { transform: translateY(0); opacity:0.6; } 50% { transform: translateY(-20px); opacity:1; } }
+        @keyframes shimmer { 0% { background-position: -200% center; } 100% { background-position: 200% center; } }
+        .welcome-particle { position: absolute; font-size: 1.5rem; pointer-events: none; }
+
+        /* ===== AUTOCOMPLETE ===== */
+        .autocomplete-list { position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid var(--border); border-radius: 8px; max-height: 160px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin-top: 4px; display: none; }
+        .autocomplete-item { padding: 12px 14px; cursor: pointer; border-bottom: 1px solid #f0f0f0; font-size: 0.95rem; }
+        .autocomplete-item:last-child { border-bottom: none; }
+        .autocomplete-item:active { background: #f9f9f9; }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <!-- HEADER BAR -->
+    <div class="topbar" id="topbar" style="display:none;">
+        <div class="topbar-left">
+            <img src="logo.png" alt="ICMR" onerror="this.style.display='none'">
+            <h1>ICMR STS</h1>
+        </div>
+        <div class="topbar-right" id="topbar-right"></div>
+    </div>
+
+    <main id="main-content"></main>
+</div>
+<div id="toast" class="toast"></div>
+
+<script>
+// ============================================================
+//  1. CONFIG
+// ============================================================
+// Credentials: { ID: { password, displayName } }
+const CREDENTIALS = {
+    'INV01': { password: 'Abhay01@',      displayName: 'Abhay' },
+    'INV02': { password: 'Tiger02@',      displayName: 'Om' },
+    'INV03': { password: 'River03@',      displayName: 'Kituu' },
+    'INV04': { password: 'Comet04@',      displayName: 'Comet' },
+    'INV05': { password: 'Eagle05@',      displayName: 'Lucky' },
+    'INV06': { password: 'Delta06@',      displayName: 'Delta' },
+    'INV07': { password: 'Mogra07@',      displayName: 'Topper' },
+    'INV08': { password: 'Coral08@',      displayName: 'Coral' },
+    'INV09': { password: 'Ember09@',      displayName: 'Ember' },
+    'INV10': { password: 'Iris10@',       displayName: 'Iris' },
+    'INV11': { password: 'Grove11@',      displayName: 'Gaurav' },
+    'INV12': { password: 'Hazel12@',      displayName: 'Vivek' },
+    'INV13': { password: 'Lily13@',       displayName: 'Lily' },
+    'INV14': { password: 'Daisy14@',      displayName: 'Daisy' },
+    'INV15': { password: 'Sunflower15@',  displayName: 'Sunflower' },
+    'INV16': { password: 'Lotus16@',      displayName: 'Lotus' },
+    'ADMIN_99': { password: 'Admin@99',   displayName: 'Admin' }
+};
+const VALID_IDS = Object.keys(CREDENTIALS);
+
+function getGreeting() {
+    const h = new Date().getHours();
+    if (h < 12) return 'Good Morning';
+    if (h < 17) return 'Good Afternoon';
+    return 'Good Evening';
+}
+
+function getDisplayName(userId) {
+    return CREDENTIALS[userId] ? CREDENTIALS[userId].displayName : userId;
+}
+
+const FIREBASE_CONFIG = {
+    apiKey: "AIzaSyBQcG52ukRpHKV5V_DoJmdVKtS8rnaVhiQ",
+    authDomain: "fap-data.firebaseapp.com",
+    databaseURL: "https://fap-data-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "fap-data",
+    storageBucket: "fap-data.firebasestorage.app",
+    messagingSenderId: "908704127881",
+    appId: "1:908704127881:web:2f966f508d2346167a1f58",
+    measurementId: "G-6YFYL8CTQJ"
+};
+
+const OCC_LABELS = {
+    'Agricultural wage labourers': 'Agri Labour',
+    'Cultivators/farmers': 'Farmer',
+    'Informal daily-wage workers (non-farm)': 'Daily-Wage',
+    'Salaried professionals': 'Salaried'
+};
+const OCC_COLORS = {
+    'Agricultural wage labourers': '#6C63FF',
+    'Cultivators/farmers': '#22C55E',
+    'Informal daily-wage workers (non-farm)': '#94A3B8',
+    'Salaried professionals': '#A855F7'
+};
+const OCC_KEYS = Object.keys(OCC_LABELS);
+
+// ============================================================
+//  2. INDEXEDDB
+// ============================================================
+const db = {
+    instance: null,
+    init() {
+        return new Promise((resolve, reject) => {
+            const r = indexedDB.open('SurveyAppDB', 1);
+            r.onupgradeneeded = e => { const d = e.target.result; if (!d.objectStoreNames.contains('surveys')) d.createObjectStore('surveys', { keyPath: 'record_id' }); };
+            r.onsuccess = e => { this.instance = e.target.result; resolve(); };
+            r.onerror = e => reject(e);
+        });
+    },
+    save(rec) { return new Promise((res, rej) => { const tx = this.instance.transaction('surveys','readwrite'); tx.objectStore('surveys').put(rec); tx.oncomplete = res; tx.onerror = rej; }); },
+    getAll() { return new Promise((res, rej) => { const tx = this.instance.transaction('surveys','readonly'); const r = tx.objectStore('surveys').getAll(); r.onsuccess = () => res(r.result); r.onerror = rej; }); },
+    delete(id) { return new Promise((res, rej) => { const tx = this.instance.transaction('surveys','readwrite'); tx.objectStore('surveys').delete(id); tx.oncomplete = res; tx.onerror = rej; }); }
+};
+
+// ============================================================
+//  3. STATE & AUTOCOMPLETE
+// ============================================================
+let S = { user: null, deviceId: null, view: 'login', survey: null, step: 0, records: [] };
+
+const FIRST_NAMES = ["Abhijeet", "Alka", "Amol", "Appasaheb", "Atul", "Balasaheb", "Bapu", "Bapurao", "Bharat", "Chandrakant", "Dada", "Dadasaheb", "Deepak", "Devidas", "Dnyaneshwar", "Ganesh", "Govind", "Hemant", "Jayshree", "Jitendra", "Kailash", "Kashinath", "Kiran", "Kishore", "Krushna", "Kusum", "Lakshmikant", "Laxmi", "Mahesh", "Manik", "Manoj", "Manthan", "Nana", "Narayan", "Navnath", "Nitin", "Nivrutti", "Pandurang", "Praveen", "Priyanka", "Promod", "Ramesh", "Ramdas", "Ravindra", "Rushikesh", "Sachin", "Sadhu", "Sagar", "Sandeep", "Sanjay", "Sashikant", "Sayali", "Shrikant", "Shubhash", "Somnath", "Sopan", "Sudhir", "Sumit", "Sunil", "Suyapand", "Tanaji", "Tushar", "Vikas", "Vishal", "Vithal", "Yogesh"];
+const MIDDLE_NAMES = ["Aba", "Anil", "Arun", "Ashok", "Babu", "Bapurao", "Bhagwan", "Bharat", "Bhimrao", "Dagdoba", "Damu", "Dattatreya", "Dilip", "Gorakh", "Haribhau", "Jalindar", "Jayanath", "Kisan", "Madhav", "Mahadev", "Malhar", "Mallikarjun", "Manik", "Maruti", "Namdeo", "Narayan", "Nitin", "Pandurang", "Prabhat", "Rajmal", "Ravishankar", "Santosh", "Shankar", "Subhash", "Sudhakar", "Sukhdev", "Sunil", "Tukaram", "Udhav", "Viththal", "Yuvraj"];
+const SURNAMES = ["Autade", "Bane", "Bardkar", "Bharge", "Bhosale", "Bhosle", "Biradar", "Chandneri", "Chaudhar", "Chaudhary", "Dadas", "Dehmukh", "Dixit", "Dhonde", "Dhope", "Dhumale", "Gaikwad", "Galkwad", "Ghodake", "Ghodke", "Ghorpade", "Inamdar", "Jagtap", "Jaunde", "Kale", "Kamble", "Katkar", "Kekan", "Khade", "Khandekar", "Khate", "Khude", "Kiledar", "Koli", "Lokare", "Lokhande", "Londhe", "Mane", "Mone", "More", "Nemade", "Pandre", "Pansare", "Patil", "Pawar", "Phadnis", "Rane", "Rathod", "Raut", "Sabale", "Salunkhe", "Saste", "Sathe", "Shaikh", "Shekke", "Shetty", "Shinde", "Shivarkar", "Sonawane", "Sone", "Talwar", "Thoke", "Waghmare", "Yadav", "Zthete"];
+
+window.handleNameInput = function(inp) {
+    const val = inp.value;
+    const parts = val.split(' ');
+    const curr = parts[parts.length - 1].toLowerCase();
+    let suggestions = [];
+    if (curr.length > 0) {
+        if (parts.length === 1) suggestions = FIRST_NAMES.filter(n => n.toLowerCase().startsWith(curr));
+        else if (parts.length === 2) suggestions = MIDDLE_NAMES.filter(n => n.toLowerCase().startsWith(curr));
+        else if (parts.length >= 3) suggestions = SURNAMES.filter(n => n.toLowerCase().startsWith(curr));
+    }
+    let list = document.getElementById('ac-list');
+    if (!list) {
+        list = document.createElement('div');
+        list.id = 'ac-list';
+        list.className = 'autocomplete-list';
+        inp.parentNode.appendChild(list);
+        inp.parentNode.style.position = 'relative';
+    }
+    if (suggestions.length > 0) {
+        list.innerHTML = suggestions.slice(0, 6).map(s => `<div class="autocomplete-item" onmousedown="event.preventDefault(); selectName('${s}', '${inp.id}')">${s}</div>`).join('');
+        list.style.display = 'block';
+    } else {
+        list.style.display = 'none';
+    }
+};
+
+window.selectName = function(name, inpId) {
+    const inp = document.getElementById(inpId);
+    const parts = inp.value.split(' ');
+    parts[parts.length - 1] = name;
+    inp.value = parts.join(' ') + ' ';
+    document.getElementById('ac-list').style.display = 'none';
+    inp.focus();
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+};
+
+document.addEventListener('mousedown', (e) => {
+    if (!e.target.closest('.form-group')) {
+        const list = document.getElementById('ac-list');
+        if (list) list.style.display = 'none';
+    }
+});
+
+// PWA Install Prompt
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+});
+
+function triggerInstall() {
+    if (deferredInstallPrompt) {
+        deferredInstallPrompt.prompt();
+        deferredInstallPrompt.userChoice.then(choice => {
+            if (choice.outcome === 'accepted') toast('App installed!');
+            deferredInstallPrompt = null;
+        });
+    } else {
+        // iOS / fallback
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+        if (isIOS) alert('To install: tap the Share button (↑) in Safari, then tap "Add to Home Screen".');
+        else alert('To install: tap the browser menu (⋮) and select "Install app" or "Add to Home Screen".');
+    }
+}
+window.triggerInstall = triggerInstall;
+
+// Sequential Record ID: INV01-0001, INV01-0002, etc.
+async function generateRecordId(userId) {
+    const all = await db.getAll();
+    const myRecs = all.filter(r => r.collected_by_id === userId);
+    const nextNum = myRecs.length + 1;
+    return userId + '-' + String(nextNum).padStart(4, '0');
+}
+
+// Auto-sync when internet reconnects
+async function autoSyncOnReconnect() {
+    if (!navigator.onLine) return;
+    if (typeof firebase === 'undefined' || !firebase.apps || !firebase.apps.length) return;
+    const all = await db.getAll();
+    const unsync = all.filter(r => r.status === 'completed' && !r.synced);
+    if (unsync.length === 0) return;
+    let cnt = 0;
+    for (const r of unsync) {
+        try {
+            await firebase.firestore().collection('surveys').doc(r.record_id).set(r);
+            r.synced = true;
+            await db.save(r);
+            cnt++;
+        } catch(e) { console.warn('Auto-sync failed for', r.record_id, e); }
+    }
+    if (cnt > 0) {
+        toast(`Auto-synced ${cnt} record(s) to cloud`);
+        if (S.view === 'dashboard' || S.view === 'admin') render();
+    }
+}
+
+window.addEventListener('load', async () => {
+    S.deviceId = localStorage.getItem('device_id');
+    if (!S.deviceId) { S.deviceId = crypto.randomUUID ? crypto.randomUUID() : 'dev_' + Math.random().toString(36).substr(2,9); localStorage.setItem('device_id', S.deviceId); }
+    await db.init();
+    window.addEventListener('online', () => { syncTopbar(); autoSyncOnReconnect(); });
+    window.addEventListener('offline', syncTopbar);
+    const u = localStorage.getItem('user_id');
+    if (u && VALID_IDS.includes(u)) { 
+        S.user = u; 
+        S.view = 'welcome'; 
+        render(); 
+        setTimeout(() => { S.view = u === 'ADMIN_99' ? 'admin' : 'dashboard'; render(); }, 1700);
+    } else {
+        render();
+    }
+    if (FIREBASE_CONFIG.apiKey) firebase.initializeApp(FIREBASE_CONFIG);
+    setTimeout(autoSyncOnReconnect, 2000);
+});
+
+function syncTopbar() {
+    const tr = document.getElementById('topbar-right');
+    if (!S.user) { document.getElementById('topbar').style.display = 'none'; return; }
+    document.getElementById('topbar').style.display = 'flex';
+    const on = navigator.onLine;
+    tr.innerHTML = `
+        <span class="net-dot ${on?'online':'offline'}"></span>
+        <span class="net-label">${on?'Online':'Offline'}</span>
+        <span class="id-badge">${S.user}</span>
+        <img src="logo.png" class="topbar-icon" onerror="this.style.display='none'" onclick="handleLogout()" title="Logout (${getDisplayName(S.user)})">
+    `;
+}
+
+function toast(msg) { const t = document.getElementById('toast'); t.innerText = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 3000); }
+
+// ============================================================
+//  4. RENDER
+// ============================================================
+function render() {
+    const c = document.getElementById('main-content');
+    syncTopbar();
+    window.scrollTo(0,0);
+    if (S.view === 'login') c.innerHTML = vLogin();
+    else if (S.view === 'welcome') vWelcome(c);
+    else if (S.view === 'dashboard') vDashboard(c);
+    else if (S.view === 'survey') vSurvey(c);
+    else if (S.view === 'admin') vAdmin(c);
+}
+
+// ============================================================
+//  5. DONUT SVG HELPER
+// ============================================================
+function donutSVG(value, total, color) {
+    const pct = total > 0 ? value / total : 0;
+    const r = 34, circ = 2 * Math.PI * r;
+    const dash = circ * pct, gap = circ - dash;
+    return `<svg class="ring" viewBox="0 0 80 80">
+        <circle cx="40" cy="40" r="${r}" fill="none" stroke="#E4E6F1" stroke-width="7"/>
+        <circle cx="40" cy="40" r="${r}" fill="none" stroke="${color}" stroke-width="7"
+            stroke-dasharray="${dash} ${gap}" stroke-linecap="round"/>
+    </svg>`;
+}
+
+// ============================================================
+//  6. LOGIN
+// ============================================================
+function vLogin() {
+    return `
+    <div class="login-wrap">
+        <div class="login-card card">
+            <img src="logo.png" alt="ICMR STS" onerror="this.style.display='none'">
+            <h2>ICMR STS</h2>
+            <p>Family Survey Data Collection</p>
+            <div class="form-group" style="text-align:left;">
+                <label>Invigilator ID</label>
+                <input type="text" id="login_id" class="input" placeholder="e.g. INV01" style="text-transform:uppercase;" autocomplete="off">
+            </div>
+            <div class="form-group" style="text-align:left;">
+                <label>Password</label>
+                <input type="password" id="login_pw" class="input" placeholder="Enter your password" autocomplete="off">
+            </div>
+            <button class="btn-cta" onclick="doLogin()">Login</button>
+        </div>
+        <div class="ios-tip">📱 iOS: Safari → Share → Add to Home Screen</div>
+    </div>`;
+}
+
+function vWelcome(c) {
+    const name = getDisplayName(S.user);
+    const greeting = getGreeting();
+    const h = new Date().getHours();
+    // Time-relevant emojis
+    let icon, particles;
+    if (h < 12) {
+        icon = '🌅';
+        particles = ['☀️','🌤️','🐦','🌻','✨','🌿'];
+    } else if (h < 17) {
+        icon = '☀️';
+        particles = ['🌞','🏡','📋','🌾','✨','📝'];
+    } else {
+        icon = '🌙';
+        particles = ['🌟','✨','🪷','🌃','💫','🌛'];
+    }
+    // Generate floating particles at random positions
+    let particleHtml = particles.map((p, i) => {
+        const left = 10 + Math.random() * 80;
+        const top = 10 + Math.random() * 70;
+        const delay = (i * 0.15).toFixed(2);
+        const anim = ['float1','float2','float3'][i % 3];
+        return `<span class="welcome-particle" style="left:${left}%; top:${top}%; animation: ${anim} 1.8s ease-in-out ${delay}s infinite;">${p}</span>`;
+    }).join('');
+
+    c.innerHTML = `
+    <div style="position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:82vh; text-align:center; overflow:hidden;">
+        ${particleHtml}
+        <div style="animation: scaleIn 0.4s cubic-bezier(0.34,1.56,0.64,1) forwards; margin-bottom:12px;">
+            <img src="logo.png" alt="Logo" style="height:80px; border-radius:16px; animation: pulse 1.2s ease-in-out infinite;" onerror="this.style.display='none'">
+        </div>
+        <div style="font-size:2.5rem; animation: scaleIn 0.3s 0.15s both; margin-bottom:8px;">${icon}</div>
+        <h2 style="font-size:1.4rem; color:var(--text); margin-bottom:4px; animation: slideUp 0.4s 0.2s both;">${greeting},</h2>
+        <h1 style="font-size:2.4rem; font-weight:800; margin-bottom:12px; animation: slideUp 0.45s 0.3s both;
+            background: linear-gradient(90deg, var(--grad-start), var(--grad-end), var(--grad-start));
+            background-size: 200% auto;
+            -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+            animation: slideUp 0.45s 0.3s both, shimmer 2s linear infinite;">${name}! 👋</h1>
+        <p style="color:var(--text-sec); font-size:0.9rem; animation: fadeIn 0.4s 0.5s both;">Loading your dashboard…</p>
+        <div style="margin-top:20px; width:120px; height:4px; border-radius:2px; background:var(--border); overflow:hidden; animation: fadeIn 0.3s 0.6s both;">
+            <div style="width:100%; height:100%; background:linear-gradient(90deg, var(--grad-start), var(--grad-end)); border-radius:2px; animation: shimmer 1.2s linear infinite; background-size:200% auto;"></div>
+        </div>
+    </div>`;
+}
+
+function doLogin() {
+    const id = document.getElementById('login_id').value.trim().toUpperCase();
+    const pw = document.getElementById('login_pw').value;
+
+    if (!CREDENTIALS[id]) { alert('Invalid ID. Please check and try again.'); return; }
+    if (CREDENTIALS[id].password !== pw) { alert('Incorrect password.'); return; }
+
+    localStorage.setItem('user_id', id);
+    S.user = id;
+
+    // Show welcome splash for 1.7 seconds, then navigate
+    const c = document.getElementById('main-content');
+    vWelcome(c);
+    syncTopbar();
+
+    setTimeout(() => {
+        S.view = id === 'ADMIN_99' ? 'admin' : 'dashboard';
+        render();
+    }, 1700);
+}
+
+function handleLogout() { localStorage.removeItem('user_id'); S.user = null; S.view = 'login'; render(); }
+
+// ============================================================
+//  7. INVIGILATOR DASHBOARD
+// ============================================================
+async function vDashboard(c) {
+    const all = await db.getAll();
+    S.records = all.filter(r => r.collected_by_id === S.user);
+    const drafts = S.records.filter(r => r.status === 'draft');
+    const completed = S.records.filter(r => r.status === 'completed');
+    const synced = completed.filter(r => r.synced);
+    const pending = completed.filter(r => !r.synced);
+
+    const totalAll = S.records.length;
+    const totalPop = completed.reduce((s,r) => s + (parseInt(r.family_size)||1), 0);
+
+    // Occupation counts
+    let occC = {}; OCC_KEYS.forEach(k => occC[k] = 0);
+    completed.forEach(r => { if (occC[r.head_occupation] !== undefined) occC[r.head_occupation]++; });
+
+    // Build donut cards
+    let donutHtml = OCC_KEYS.map(k => {
+        const cnt = occC[k];
+        const pct = completed.length > 0 ? ((cnt/completed.length)*100).toFixed(1) : '0.0';
+        return `<div class="occ-card">
+            <div class="ring-wrap">
+                ${donutSVG(cnt, completed.length || 1, OCC_COLORS[k])}
+                <span class="ring-num">${cnt}</span>
+            </div>
+            <div class="occ-label">${OCC_LABELS[k]}</div>
+            <div class="occ-pct">${pct}%</div>
+        </div>`;
+    }).join('');
+
+    // Recent records (last 5)
+    const recent = [...completed].sort((a,b) => new Date(b.date_time) - new Date(a.date_time)).slice(0,5);
+    let recentHtml = '';
+    if (recent.length === 0) {
+        recentHtml = `<p style="color:var(--text-sec); font-size:0.88rem; padding:8px 0;">No interviews yet. Start your first!</p>`;
+    } else {
+        const colors = ['#6C63FF','#22C55E','#F59E0B','#A855F7','#EF4444'];
+        recent.forEach((r,i) => {
+            const d = new Date(r.date_time);
+            const ds = d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'});
+            const initials = (r.head_name||'?').split(' ').map(w=>w[0]).join('').toUpperCase().substring(0,2);
+            recentHtml += `
+            <div class="rec-item" onclick="resumeSurvey('${r.record_id}')">
+                <div class="rec-avatar" style="background:${colors[i%5]}">${initials}</div>
+                <div class="rec-body">
+                    <div class="rname">${r.head_name}</div>
+                    <div class="rsub"><strong style="color:var(--primary); font-size:0.68rem;">${r.record_id}</strong> · ${ds} · ${r.head_occupation ? OCC_LABELS[r.head_occupation]||r.head_occupation : ''}</div>
+                </div>
+                <span class="rec-badge ${r.synced?'badge-synced':'badge-done'}">${r.synced?'☁ Synced':'✓ Done'}</span>
+            </div>`;
+        });
+    }
+
+    // Draft items
+    let draftHtml = '';
+    drafts.forEach(r => {
+        draftHtml += `
+        <div class="rec-item">
+            <div class="rec-avatar" style="background:var(--accent-orange)">📝</div>
+            <div class="rec-body">
+                <div class="rname">${r.head_name || 'Unnamed Draft'}</div>
+                <div class="rsub"><strong style="color:var(--accent-orange); font-size:0.68rem;">${r.record_id}</strong> · In progress</div>
+            </div>
+            <div class="rec-actions">
+                <button onclick="resumeSurvey('${r.record_id}')" title="Resume">▶️</button>
+                <button onclick="deleteRecord('${r.record_id}')" title="Delete">🗑️</button>
+            </div>
+        </div>`;
+    });
+
+    c.innerHTML = `
+    <!-- STATS ROW -->
+    <div class="stats-row">
+        <div class="stat-box"><div class="num">${totalAll}</div><div class="lbl">Total (All)</div></div>
+        <div class="stat-box"><div class="num" style="color:var(--accent-green)">${completed.length}</div><div class="lbl">Completed</div></div>
+        <div class="stat-box"><div class="num" style="color:var(--accent-orange)">${drafts.length}</div><div class="lbl">In Progress</div></div>
+        <div class="stat-box"><div class="num" style="color:var(--accent-purple)">${pending.length}</div><div class="lbl">Pending Sync</div></div>
+    </div>
+
+    <!-- FAMILIES & POPULATION BANNER -->
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px;">
+        <div class="card card-flush" style="text-align:center; margin-bottom:0;">
+            <span style="font-size:0.68rem; color:var(--text-sec); text-transform:uppercase; letter-spacing:0.5px;">Families Covered</span>
+            <div style="font-size:1.5rem; font-weight:800; color:var(--primary);">${completed.length}</div>
+        </div>
+        <div class="card card-flush" style="text-align:center; margin-bottom:0;">
+            <span style="font-size:0.68rem; color:var(--text-sec); text-transform:uppercase; letter-spacing:0.5px;">Population Covered</span>
+            <div style="font-size:1.5rem; font-weight:800; color:var(--accent-green);">${totalPop}</div>
+        </div>
+    </div>
+
+    <!-- OCCUPATIONAL GROUPS -->
+    <div class="card" style="padding:18px;">
+        <div class="occ-section-title">Occupational Groups</div>
+        <div class="occ-grid">${donutHtml}</div>
+    </div>
+
+    <!-- CTA -->
+    <button class="btn-cta" onclick="startNewSurvey()">＋ New Interview</button>
+
+    <!-- INSTALL BUTTON -->
+    <div class="install-banner" onclick="triggerInstall()">📲 Add to Home Screen</div>
+
+    <!-- ACTIONS -->
+    <div class="action-grid">
+        <div class="action-btn" onclick="syncAllDevices()"><div class="aicon">🔄</div>Sync All Devices</div>
+        <div class="action-btn" onclick="S.view='records'; renderRecordsList()"><div class="aicon">📊</div>View Data</div>
+        <div class="action-btn" onclick="exportExcel()"><div class="aicon">📗</div>Export Excel</div>
+        <div class="action-btn" onclick="exportBackup()"><div class="aicon">📦</div>Export JSON</div>
+        <div class="action-btn full-width" onclick="document.getElementById('imp_file_dash').click()"><div class="aicon">📂</div>Import Data</div>
+    </div>
+    <input type="file" id="imp_file_dash" accept=".json" style="display:none" onchange="handleImportFile(this)">
+
+    <!-- DRAFTS -->
+    ${drafts.length > 0 ? `<div class="sec-title">Drafts</div>${draftHtml}` : ''}
+
+    <!-- RECENT -->
+    <div class="sec-title">My Recent Interviews</div>
+    ${recentHtml}
+
+    <!-- LOGOUT -->
+    <div class="logout-row"><button class="logout-btn" onclick="handleLogout()">Logout</button></div>
+    `;
+}
+
+// Records full list
+async function renderRecordsList() {
+    const c = document.getElementById('main-content');
+    const all = await db.getAll();
+    const mine = all.filter(r => r.collected_by_id === S.user && r.status === 'completed');
+    const colors = ['#6C63FF','#22C55E','#F59E0B','#A855F7','#EF4444'];
+    let html = `<button class="btn btn-outline" style="margin-bottom:14px;" onclick="S.view='dashboard'; render()">← Back to Dashboard</button>
+    <div class="sec-title">All Completed Surveys (${mine.length})</div>`;
+    mine.sort((a,b) => new Date(b.date_time) - new Date(a.date_time)).forEach((r,i) => {
+        const d = new Date(r.date_time);
+        const ds = d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+        const initials = (r.head_name||'?').split(' ').map(w=>w[0]).join('').toUpperCase().substring(0,2);
+        html += `
+        <div class="rec-item" onclick="resumeSurvey('${r.record_id}')">
+            <div class="rec-avatar" style="background:${colors[i%5]}">${initials}</div>
+            <div class="rec-body">
+                <div class="rname">${r.head_name}</div>
+                <div class="rsub"><strong style="color:var(--primary); font-size:0.68rem;">${r.record_id}</strong> · ${ds} · ${r.family_size} members · ${OCC_LABELS[r.head_occupation]||r.head_occupation}</div>
+            </div>
+            <span class="rec-badge ${r.synced?'badge-synced':'badge-done'}">${r.synced?'☁':'✓'}</span>
+        </div>`;
+    });
+    if (mine.length === 0) html += `<p style="color:var(--text-sec);">No records yet.</p>`;
+    c.innerHTML = html;
+}
+window.renderRecordsList = renderRecordsList;
+
+// Sync helper
+async function syncAllDevices() {
+    if (!navigator.onLine) return toast('You are offline. Connect to sync.');
+    if (typeof firebase === 'undefined' || !firebase.apps || !firebase.apps.length) return toast('Firebase not configured.');
+    const all = await db.getAll();
+    const unsync = all.filter(r => r.status === 'completed' && !r.synced && r.collected_by_id === S.user);
+    if (unsync.length === 0) return toast('All records already synced!');
+    let cnt = 0;
+    for (const r of unsync) {
+        try { await firebase.firestore().collection('surveys').doc(r.record_id).set(r); r.synced = true; await db.save(r); cnt++; } catch(e) { console.warn(e); }
+    }
+    toast(`Synced ${cnt} record(s) to cloud.`);
+    render();
+}
+window.syncAllDevices = syncAllDevices;
+
+// ============================================================
+//  8. SURVEY WIZARD
+// ============================================================
+const STEPS = 6;
+
+async function startNewSurvey() {
+    const recId = await generateRecordId(S.user);
+    S.survey = {
+        record_id: recId,
+        collected_by_id: S.user, device_id: S.deviceId,
+        date_time: new Date().toISOString(), status: 'draft', synced: false,
+        head_name: '', head_age: '', head_occupation: '', family_size: 1, members: [],
+        gps_lat: null, gps_lng: null, gps_acc: null, map_snapshot_image: null,
+        manual_address: '', location_source: ''
+    };
+    S.step = 0; await db.save(S.survey); S.view = 'survey'; render();
+}
+async function resumeSurvey(id) {
+    const r = (await db.getAll()).find(x => x.record_id === id);
+    if (r) { S.survey = r; S.step = 0; S.view = 'survey'; render(); }
+}
+async function deleteRecord(id) { if(confirm("Delete this record?")) { await db.delete(id); render(); } }
+
+function vSurvey(c) {
+    const pct = (S.step / STEPS) * 100;
+    let h = `<div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+        <p style="font-size:0.75rem; color:var(--text-sec); text-align:right; margin-bottom:8px;">Step ${S.step+1} of ${STEPS}</p>
+        <div class="card">`;
+    if (S.step===0) h += sName();
+    else if (S.step===1) h += sOcc();
+    else if (S.step===2) h += sSize();
+    else if (S.step===3) h += sMembers();
+    else if (S.step===4) h += sLocation();
+    else if (S.step===5) h += sReview();
+    h += '</div>';
+    c.innerHTML = h;
+}
+
+async function next() { await db.save(S.survey); S.step++; render(); }
+async function back() { await db.save(S.survey); S.step--; render(); }
+
+// Step 0
+function sName() {
+    return `<h3 style="margin-bottom:14px;">Head of the Family</h3>
+    <div class="form-group"><label>Full Name</label>
+    <input type="text" id="in_hn" class="input" value="${S.survey.head_name}" placeholder="First Middle Last" oninput="handleNameInput(this)" autocomplete="off"></div>
+    <div class="form-group"><label>Age</label>
+    <input type="number" id="in_hage" class="input" value="${S.survey.head_age||''}" placeholder="Age in years" min="1" max="120"></div>
+    <div class="nav-buttons">
+        <button class="btn btn-outline" onclick="S.view='dashboard'; render()">Cancel</button>
+        <button class="btn btn-primary" onclick="let v=document.getElementById('in_hn').value.trim(); let a=document.getElementById('in_hage').value; if(!v){alert('Name required');return;} if(!a){alert('Age required');return;} S.survey.head_name=v; S.survey.head_age=a; next();">Next</button>
+    </div>`;
+}
+
+// Step 1
+function sOcc() {
+    const descs = {
+        'Agricultural wage labourers': 'Landless daily farm workers (sugarcane cutters, harvesters)',
+        'Cultivators/farmers': 'Land-owning/leasing, dairy farming',
+        'Informal daily-wage workers (non-farm)': 'Construction, vendors, loaders, contract factory',
+        'Salaried professionals': 'Permanent factory, govt, pvt salaried'
+    };
+    let opts = OCC_KEYS.map(k => {
+        const sel = S.survey.head_occupation === k;
+        return `<button class="btn ${sel?'btn-primary':'btn-outline'}" style="text-align:left; padding:12px 14px; margin-bottom:6px;" onclick="S.survey.head_occupation='${k}'; render();">
+            <span style="flex:1"><strong>${OCC_LABELS[k]}</strong><br><span style="font-size:0.78rem; font-weight:400; opacity:0.7;">${descs[k]}</span></span>
+            ${sel ? '✓' : ''}
+        </button>`;
+    }).join('');
+    return `<h3 style="margin-bottom:14px;">Primary Occupation</h3>${opts}
+    <div class="nav-buttons">
+        <button class="btn btn-outline" onclick="back()">Back</button>
+        <button class="btn btn-primary" onclick="if(!S.survey.head_occupation){alert('Select occupation');return;} next();">Next</button>
+    </div>`;
+}
+
+// Step 2
+function sSize() {
+    return `<h3 style="margin-bottom:14px;">Household Size</h3>
+    <div class="form-group"><label>Including Head, how many people live here?</label>
+    <input type="number" id="in_fs" class="input" min="1" max="50" value="${S.survey.family_size}"></div>
+    <div class="nav-buttons">
+        <button class="btn btn-outline" onclick="back()">Back</button>
+        <button class="btn btn-primary" onclick="let v=parseInt(document.getElementById('in_fs').value); if(!v||v<1){alert('At least 1');return;} S.survey.family_size=v; if(S.survey.members.length>v-1) S.survey.members=S.survey.members.slice(0,v-1); next();">Next</button>
+    </div>`;
+}
+
+// Step 3
+function sMembers() {
+    const need = S.survey.family_size - 1;
+    const have = S.survey.members.length;
+    if (need <= 0) return `<h3 style="margin-bottom:14px;">Additional Members</h3><p style="color:var(--text-sec); margin-bottom:14px;">Family size is 1 — no additional members.</p>
+        <div class="nav-buttons"><button class="btn btn-outline" onclick="back()">Back</button><button class="btn btn-primary" onclick="next()">Next</button></div>`;
+
+    let ml = '';
+    if (have > 0) {
+        ml = '<ul class="member-list">';
+        S.survey.members.forEach((m,i) => {
+            ml += `<li><div><strong>${m.name}</strong><br><span style="font-size:0.82rem; color:var(--text-sec);">${m.relation} · Age ${m.age}</span></div>
+            <button class="btn btn-danger" style="width:auto; padding:5px 10px; margin:0; font-size:0.8rem;" onclick="removeMember(${i})">Remove</button></li>`;
+        });
+        ml += '</ul>';
+    }
+
+    let form = '';
+    if (have < need) {
+        form = `<div style="background:var(--bg); padding:14px; border-radius:${`var(--radius-sm)`}; border:1px solid var(--border); margin-bottom:14px;">
+            <h4 style="margin-bottom:10px; font-size:0.9rem;">Add Member ${have+1} of ${need}</h4>
+            <div class="form-group"><label>Full Name</label><input type="text" id="m_name" class="input" oninput="handleNameInput(this)" autocomplete="off"></div>
+            <div class="form-group"><label>Relation to Head</label><select id="m_rel" class="input">
+                <option value="">Select…</option><option>Spouse</option><option>Child</option><option>Parent</option><option>Sibling</option><option>Other</option></select></div>
+            <div class="form-group"><label>Age (years)</label><input type="number" id="m_age" class="input" min="0" max="120"></div>
+            <div class="form-group"><label>Phone (optional)</label><input type="tel" id="m_ph" class="input"></div>
+            <div class="form-group"><label>Occupation</label><select id="m_occ" class="input">
+                <option value="">Select…</option>
+                <option value="Agricultural wage labourers">Agri Labour</option>
+                <option value="Cultivators/farmers">Farmer</option>
+                <option value="Informal daily-wage workers (non-farm)">Daily-Wage</option>
+                <option value="Salaried professionals">Salaried</option>
+                <option value="Not Applicable/Student">N/A / Student</option></select></div>
+            <button class="btn btn-secondary" onclick="saveMember()">Save Member</button>
+        </div>`;
+    } else {
+        form = `<div style="padding:14px; background:#E8F5E9; color:#16A34A; border-radius:8px; margin-bottom:14px; font-weight:600; text-align:center;">All ${need} member(s) added ✓</div>`;
+    }
+
+    return `<h3 style="margin-bottom:14px;">Family Members (${have}/${need})</h3>${ml}${form}
+    <div class="nav-buttons">
+        <button class="btn btn-outline" onclick="back()">Back</button>
+        <button class="btn btn-primary" onclick="advMem()" ${have<need?'disabled style="opacity:0.4"':''}>Next</button>
+    </div>`;
+}
+function saveMember() {
+    const n=document.getElementById('m_name').value.trim(), r=document.getElementById('m_rel').value,
+          a=document.getElementById('m_age').value, p=document.getElementById('m_ph').value.trim(),
+          o=document.getElementById('m_occ').value;
+    if(!n||!r||!a||!o) return alert('Fill all required fields.');
+    S.survey.members.push({name:n, relation:r, age:a, phone:p, occupation:o});
+    db.save(S.survey).then(render);
+}
+function removeMember(i) { S.survey.members.splice(i,1); db.save(S.survey).then(render); }
+function advMem() { if(S.survey.members.length < S.survey.family_size-1) return; next(); }
+window.saveMember=saveMember; window.removeMember=removeMember; window.advMem=advMem;
+
+// Step 4
+function sLocation() {
+    const s = S.survey;
+    let mapBlock = '';
+    if (s.gps_lat) {
+        mapBlock = `<div style="margin:14px 0; text-align:center;">
+            <p style="font-size:0.75rem; color:var(--text-sec); margin-bottom:6px;">Tap map to open Google Maps (Satellite)</p>
+            <a href="https://maps.google.com/maps?q=${s.gps_lat},${s.gps_lng}&t=k" target="_blank" style="display:block; border-radius:10px; overflow:hidden; border:1px solid var(--border);">
+                <iframe width="100%" height="180" frameborder="0" scrolling="no" src="https://maps.google.com/maps?q=${s.gps_lat},${s.gps_lng}&t=k&z=17&output=embed" style="pointer-events:none;"></iframe>
+            </a>
+        </div>`;
+    }
+    return `<h3 style="margin-bottom:14px;">Location & Address</h3>
+    <button class="btn ${s.gps_lat?'btn-outline':'btn-secondary'}" onclick="captureGPS()" id="gps-btn">${s.gps_lat?'📍 Update Location':'📍 Capture GPS Location'}</button>
+    <div id="gps-status" style="margin-bottom:8px; font-size:0.88rem;">
+        ${s.gps_lat ? `<span style="color:var(--accent-green); font-weight:600;">✔ ${s.gps_lat.toFixed(5)}, ${s.gps_lng.toFixed(5)}</span>` : `<span style="color:var(--error);">No GPS captured yet</span>`}
+    </div>
+    ${mapBlock}
+    <div class="form-group" style="margin-top:10px;"><label>Manual Address (Required)</label>
+    <textarea id="in_addr" class="input" rows="3" placeholder="House no, street, landmark…">${s.manual_address||''}</textarea></div>
+    <div class="nav-buttons">
+        <button class="btn btn-outline" onclick="back()">Back</button>
+        <button class="btn btn-primary" onclick="saveLoc()">Next</button>
+    </div>`;
+}
+function captureGPS() {
+    const btn = document.getElementById('gps-btn');
+    btn.innerText = "Locating…";
+    if (!navigator.geolocation) { alert('Geolocation not supported.'); btn.innerText='📍 Capture GPS Location'; return; }
+    navigator.geolocation.getCurrentPosition(
+        p => { S.survey.gps_lat=p.coords.latitude; S.survey.gps_lng=p.coords.longitude; S.survey.gps_acc=p.coords.accuracy; S.survey.location_source='auto_gps'; render(); },
+        e => { alert('Location error: '+e.message); S.survey.location_source='manual_only'; btn.innerText='📍 Capture GPS Location'; },
+        {enableHighAccuracy:true, timeout:15000}
+    );
+}
+function saveLoc() { const a=document.getElementById('in_addr').value.trim(); if(!a){alert('Address required');return;} S.survey.manual_address=a; if(!S.survey.gps_lat) S.survey.location_source='manual_only'; next(); }
+window.captureGPS=captureGPS; window.saveLoc=saveLoc;
+
+// Step 5
+function sReview() {
+    const s = S.survey;
+    const gpsLink = s.gps_lat ? `<a href="https://maps.google.com/maps?q=${s.gps_lat},${s.gps_lng}&t=k" target="_blank" style="color:var(--primary);">${s.gps_lat.toFixed(4)}, ${s.gps_lng.toFixed(4)} 🛰️</a>` : 'None';
+    let memList = s.members.map(m => `<li style="padding:6px 0; border-bottom:1px solid #eee; font-size:0.88rem;">${m.name} — ${m.relation}, Age ${m.age}</li>`).join('');
+    return `<h3 style="margin-bottom:14px;">Review & Submit</h3>
+    <div style="background:linear-gradient(135deg, var(--grad-start), var(--grad-end)); color:white; padding:10px 14px; border-radius:8px; margin-bottom:14px; text-align:center;">
+        <span style="font-size:0.7rem; opacity:0.8; text-transform:uppercase; letter-spacing:1px;">Record Code</span>
+        <div style="font-size:1.3rem; font-weight:800; letter-spacing:1px;">${s.record_id}</div>
+    </div>
+    <div style="background:var(--bg); padding:14px; border-radius:10px; font-size:0.9rem; margin-bottom:14px; line-height:1.8;">
+        <p><strong>Head:</strong> ${s.head_name} (Age ${s.head_age})</p>
+        <p><strong>Occupation:</strong> ${OCC_LABELS[s.head_occupation]||s.head_occupation}</p>
+        <p><strong>Family Size:</strong> ${s.family_size}</p>
+        <p><strong>Address:</strong> ${s.manual_address}</p>
+        <p><strong>GPS:</strong> ${gpsLink}</p>
+    </div>
+    ${s.members.length > 0 ? `<div style="margin-bottom:14px;"><strong style="font-size:0.85rem;">Members:</strong><ul style="list-style:none; margin-top:6px;">${memList}</ul></div>` : ''}
+    <div class="nav-buttons">
+        <button class="btn btn-outline" onclick="back()">Back</button>
+        <button class="btn-cta" style="flex:2" onclick="submitSurvey()">✓ Save Record</button>
+    </div>`;
+}
+
+async function submitSurvey() {
+    S.survey.status = 'completed'; 
+    S.survey.date_time = new Date().toISOString(); 
+    S.survey.synced = false;
+    await db.save(S.survey);
+    
+    toast("Survey Saved Successfully!");
+    S.survey = null; 
+    S.view = 'dashboard'; 
+    render();
+
+    // Trigger background sync to firebase so it doesn't block the UI redirect
+    if (navigator.onLine && typeof firebase !== 'undefined' && firebase.apps && firebase.apps.length > 0) {
+        setTimeout(autoSyncOnReconnect, 100);
+    }
+}
+window.submitSurvey = submitSurvey;
+
+// ============================================================
+//  9. EXPORTS
+// ============================================================
+async function exportBackup() {
+    const all = await db.getAll();
+    const my = all.filter(r => r.collected_by_id === S.user);
+    const a = document.createElement('a');
+    a.href = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(my));
+    a.download = `SurveyBackup_${S.user}_${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+}
+window.exportBackup = exportBackup;
+
+async function exportExcel() {
+    const all = await db.getAll();
+    let recs = S.user === 'ADMIN_99' ? all : all.filter(r => r.collected_by_id === S.user);
+    recs = recs.filter(r => r.status === 'completed');
+    if (!recs.length) return alert("No completed records.");
+    const wb = XLSX.utils.book_new();
+    const hh = recs.map(r => ({RecordID:r.record_id, CollectorID:r.collected_by_id, DeviceID:r.device_id, CaptureTime:new Date(r.date_time).toLocaleString(), HeadName:r.head_name, HeadAge:r.head_age||'', HeadOccupation:r.head_occupation, FamilySize:r.family_size, Address:r.manual_address, Lat:r.gps_lat||'', Lng:r.gps_lng||'', GPSAcc:r.gps_acc?Math.round(r.gps_acc):'', LocSource:r.location_source}));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(hh), "Household Summary");
+    const mm = [];
+    recs.forEach(r => { mm.push({RecordID:r.record_id, Idx:1, Name:r.head_name, Relation:'Head', Age:r.head_age||'', Phone:'', Occupation:r.head_occupation});
+        (r.members||[]).forEach((m,i) => mm.push({RecordID:r.record_id, Idx:i+2, Name:m.name, Relation:m.relation, Age:m.age, Phone:m.phone||'', Occupation:m.occupation})); });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mm), "Family Members");
+    XLSX.writeFile(wb, `Survey_Export_${S.user}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+window.exportExcel = exportExcel;
+
+function handleImportFile(input) {
+    const file = input.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        try { const data = JSON.parse(e.target.result); let c=0; for(const r of data){await db.save(r);c++;} toast(`Imported ${c} record(s)`); render(); } catch(err) { alert('Invalid file.'); }
+    };
+    reader.readAsText(file); input.value = '';
+}
+window.handleImportFile = handleImportFile;
+
+// ============================================================
+//  10. ADMIN DASHBOARD
+// ============================================================
+async function vAdmin(c) {
+    const all = await db.getAll();
+    const completed = all.filter(r => r.status === 'completed');
+    const totalPop = completed.reduce((s,r) => s + (parseInt(r.family_size)||1), 0);
+    const synced = completed.filter(r => r.synced).length;
+
+    let occC = {}; OCC_KEYS.forEach(k => occC[k] = 0);
+    completed.forEach(r => { if (occC[r.head_occupation] !== undefined) occC[r.head_occupation]++; });
+
+    let donutHtml = OCC_KEYS.map(k => {
+        const cnt = occC[k];
+        const pct = completed.length > 0 ? ((cnt/completed.length)*100).toFixed(1) : '0.0';
+        return `<div class="occ-card">
+            <div class="ring-wrap">${donutSVG(cnt, completed.length||1, OCC_COLORS[k])}<span class="ring-num">${cnt}</span></div>
+            <div class="occ-label">${OCC_LABELS[k]}</div><div class="occ-pct">${pct}%</div>
+        </div>`;
+    }).join('');
+
+    c.innerHTML = `
+    <div class="stats-row">
+        <div class="stat-box"><div class="num">${all.length}</div><div class="lbl">Total (All)</div></div>
+        <div class="stat-box"><div class="num" style="color:var(--accent-green)">${completed.length}</div><div class="lbl">Families</div></div>
+        <div class="stat-box"><div class="num" style="color:var(--primary)">${totalPop}</div><div class="lbl">Population</div></div>
+        <div class="stat-box"><div class="num" style="color:var(--accent-purple)">${synced}</div><div class="lbl">Synced</div></div>
+    </div>
+
+    <div class="card" style="padding:18px;">
+        <div class="occ-section-title">Global Occupational Breakdown</div>
+        <div class="occ-grid">${donutHtml}</div>
+    </div>
+
+    <!-- INSTALL BUTTON -->
+    <div class="install-banner" onclick="triggerInstall()">📲 Add to Home Screen</div>
+
+    <div class="sec-title">Admin Actions</div>
+    <div class="action-grid">
+        <div class="action-btn" onclick="document.getElementById('imp_file_admin').click()"><div class="aicon">📂</div>Import JSON</div>
+        <div class="action-btn" onclick="adminSyncFirebase()"><div class="aicon">☁️</div>Firebase Fetch</div>
+        <div class="action-btn" onclick="exportExcel()"><div class="aicon">📗</div>Master Excel</div>
+        <div class="action-btn" onclick="exportBackup()"><div class="aicon">📦</div>Master JSON</div>
+    </div>
+    <input type="file" id="imp_file_admin" accept=".json" style="display:none" onchange="handleImportFile(this)">
+
+    <div class="logout-row"><button class="logout-btn" onclick="handleLogout()">Logout Admin</button></div>`;
+}
+
+async function adminSyncFirebase() {
+    if (typeof firebase === 'undefined' || !firebase.apps || !firebase.apps.length) return toast('Firebase not configured.');
+    toast('Fetching…');
+    try {
+        const snap = await firebase.firestore().collection('surveys').get();
+        let c=0; for(const doc of snap.docs){ const d=doc.data(); d.synced=true; await db.save(d); c++; }
+        toast(`Merged ${c} cloud record(s)`); render();
+    } catch(e) { alert('Error: '+e.message); }
+}
+window.adminSyncFirebase = adminSyncFirebase;
+</script>
+</body>
+</html>
